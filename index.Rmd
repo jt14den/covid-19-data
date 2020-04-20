@@ -14,15 +14,23 @@ library(RColorBrewer)
 library(kableExtra)
 ```
 
+## Read in Data
+
+The covid data comes from the NYT. It's county level data. 
 
 ```{r message=FALSE}
 #covid <- read_csv("us-counties.csv")
 covid <- read_csv("https://raw.githubusercontent.com/nytimes/covid-19-data/master/us-counties.csv")
 ```
 
+Let's look at it. 
+
 ```{r}
 covid
 ```
+
+I'd like to filter the data by just LA county and plot it using a bar chart.
+
 
 ```{r}
 covid %>% 
@@ -34,6 +42,9 @@ covid %>%
         legend.position = "none") +
   xlab("number of covid-19 deaths in LA")
 ```
+
+Let's use the same filter and then make a line graph. 
+
 ```{r}
 covid %>% 
   filter(county == "Los Angeles") %>% 
@@ -44,7 +55,7 @@ covid %>%
   xlab("number of covid-19 deaths in LA")
 ```
 
-Here we'll plot the death rate on a line graph by hotspots. See there's a problem with New Orleans. This is because the parish New Orleans is in is "Orleans", but there's also an Orleans in New York, so the filtering below isn't working. Need to fix so we filter out Orleans Country New York. 
+Some more filtering. Here I want to pull out hotspot countys, Orleans, LA, NYC, and King county. The problem is that there are more than one Orleans counties (parish), so I  want to first filter out the other Orleans counties in NY and Vermont then do our county filter. We'll then pipe the result into ggplot and create a facet (small multiples) of those counties deaths by covid.
 
 ```{r grouped}
 covid_grp <- covid %>% 
@@ -62,36 +73,37 @@ covid_grp <- covid %>%
 covid_grp
 ```
 
-Let's calculate a rate of growth. Here let's use the death rate b/c testing is problematic as an indicator until capacity increases and more of the population is tested. 
+Let's calculate a rate of growth. Here let's use the death rate b/c testing is still limited and death rate serves as more of a measure of how our stay at home efforts are doing. Using mutate, we'll use the lag function to create a diff_growth column that is the number of deaths that occured since the previous day. This because the NYT data gives us cumulative deaths, not the number that occured each day. We'll then create a rate_percent column that takes the `diff_growth` and divides by the diff_date (one since this is daily data) and then by the number of cumulative deaths on that day times 100. So, this number is the rate of growth from the previous day. 
 
 ```{r}
 covid_day_diff_rate <- covid %>% 
   group_by(county, state) %>% 
-  filter(county %in% c("Los Angeles", "New York City", "King")) %>% 
   arrange(date) %>% 
   mutate(diff_date = date - lag(date),  # Difference in time (just in case there are gaps)
          diff_growth = deaths - lag(deaths), # Difference in deaths between days
          rate_percent = (diff_growth / as.double(diff_date)) / deaths * 100)  # growth rate in percent 
 ```
 
+Now I want to see this rate expressed by week. Lubridate has a nice function that will return the `epiweek` -- epidemological week number used by WHO and CDC. I group_by that epiweek and then take the mean of the daily means to give us a weekly mean. I'll save as a new dataframe so I can work with it.
+
 ```{r}
-covid_day_diff_rate %>% 
+covid_drate_byweek <- covid_day_diff_rate %>% 
   select(date, county, state, deaths, diff_growth, rate_percent) %>% 
-  group_by(epiweek(date), county, state) %>% 
+  group_by(week = epiweek(date), county, state) %>% 
   drop_na() %>% 
-  summarize(num_deaths = sum(diff_growth), week_avg_increase = mean(rate_percent)) %>% 
-  arrange(county) %>% 
-  kable()
+  summarize(num_deaths = sum(diff_growth), week_avg_increase = mean(rate_percent))
 ```
+
+I want to see the last 10 days in LA. 
 
 ```{r}
 covid_day_diff_rate %>% 
   filter(county == "Los Angeles") %>% 
+  arrange(date) %>% 
   tail(10) %>% 
   kable()
-  
 ```
-
+Let's plot 
 
 ```{r deaths-by-day}  
 ggplot(data = covid_day_diff_rate, aes(x = date, y = diff_growth, color = county)) + 
